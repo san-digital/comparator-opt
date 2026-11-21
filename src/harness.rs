@@ -1,8 +1,12 @@
+//! The differential test harness: [`KernelSpec`] describes a reference and a fast path,
+//! and [`verify_kernel`] checks that they agree.
+
 use std::fmt;
 use std::hint::black_box;
 use std::time::Instant;
 
-/// Deterministic 64-bit SplitMix64 PRNG for zero-dependency differential corpus generation.
+/// SplitMix64, a small deterministic random number generator. The harness uses it so that
+/// every run tests the same inputs for a given seed.
 #[derive(Clone, Debug)]
 pub struct SplitMix64 {
     state: u64,
@@ -35,40 +39,51 @@ impl SplitMix64 {
     }
 }
 
-/// Specification pairing a simple, human-readable reference implementation (`eval_ref`)
-/// and input validity predicate (`is_valid`) with a candidate fast path (`eval_fast`).
+/// Pairs a short, readable reference (`eval_ref`) with a fast version under test (`eval_fast`),
+/// plus the inputs to test them on.
+///
+/// Everything here except the fast function that `eval_fast` calls is part of the
+/// specification. In this crate each impl sits in a pinned block, and `eval_fast` only calls a
+/// `fast_*` function defined outside it (see the crate docs).
 pub trait KernelSpec {
     type Input: Clone + fmt::Debug;
     type Output: PartialEq + fmt::Debug;
 
     fn name(&self) -> &'static str;
 
-    /// Domain guard `ValidInput(x)`. Pinned in `comparator.lock` and checked for non-vacuity.
+    /// Returns `true` for inputs the fast path must handle. Inputs it rejects are skipped.
+    /// [`verify_kernel`] fails if it rejects too many sampled inputs (see
+    /// [`VerifyConfig::min_valid_bps`]), so it cannot be used to skip the comparison entirely.
     fn is_valid(&self, input: &Self::Input) -> bool;
 
-    /// Crystal-clear reference implementation (`ref_fn`), pinned in `comparator.lock`.
+    /// The reference implementation: the version a reviewer reads and trusts.
     fn eval_ref(&self, input: &Self::Input) -> Self::Output;
 
-    /// Candidate superoptimized implementation (`fast_fn`).
+    /// The fast implementation under test.
     fn eval_fast(&self, input: &Self::Input) -> Self::Output;
 
-    /// Deterministic corner and cliff-edge inputs that must all satisfy `is_valid`.
+    /// Hand-picked edge cases. Each one must satisfy `is_valid`.
     fn boundary_inputs(&self) -> Vec<Self::Input>;
 
-    /// Deterministic corpus sampler used for non-vacuity and differential testing.
+    /// Generates one random input. Called [`VerifyConfig::samples`] times.
     fn sample_input(&self, rng: &mut SplitMix64) -> Self::Input;
 
-    /// Representative benchmark input for measuring `eval_ref` vs `eval_fast` throughput.
+    /// A typical input used to time `eval_ref` against `eval_fast`. Must satisfy `is_valid`.
     fn bench_input(&self) -> Self::Input;
 }
 
-/// Parameters controlling comparator verification and non-vacuity enforcement.
+/// Settings for [`verify_kernel`].
 #[derive(Clone, Copy, Debug)]
 pub struct VerifyConfig {
+    /// Number of random inputs to generate. With `0`, the random-input checks, including the
+    /// `min_valid_bps` check, are skipped.
     pub samples: usize,
+    /// Seed for [`SplitMix64`].
     pub seed: u64,
-    /// Minimum required `is_valid` acceptance rate in basis points (`0..=10_000`).
+    /// Minimum share of random inputs that `is_valid` must accept, in basis points
+    /// (`10_000` = 100%). The default is `5_000` (50%).
     pub min_valid_bps: u32,
+    /// How many times to run each implementation on the benchmark input.
     pub bench_iters: u32,
 }
 
@@ -83,7 +98,7 @@ impl Default for VerifyConfig {
     }
 }
 
-/// Verification and performance receipt emitted when a `KernelSpec` passes all gates.
+/// Summary returned by [`verify_kernel`] when every check passes.
 #[derive(Clone, Debug)]
 pub struct VerifyReceipt {
     pub kernel: String,
@@ -146,7 +161,12 @@ impl fmt::Display for HarnessError {
 
 impl std::error::Error for HarnessError {}
 
-/// Executes boundary, non-vacuity, differential equivalence, and timing checks on `spec`.
+/// Checks that `spec.eval_fast` agrees with `spec.eval_ref`, then times both.
+///
+/// In order: every boundary input, then `cfg.samples` random inputs (skipping ones `is_valid`
+/// rejects, and failing if too many are rejected), then the benchmark input. Timing is a single
+/// run of `cfg.bench_iters` calls each, reference first, with no warm-up, so treat the speedup
+/// as a rough figure.
 pub fn verify_kernel<K: KernelSpec>(
     spec: &K,
     cfg: &VerifyConfig,
@@ -209,7 +229,7 @@ pub fn verify_kernel<K: KernelSpec>(
         });
     }
 
-    // 3. Calibrated black-box timing comparison.
+    // 3. Timing. `black_box` stops the compiler from optimizing the calls away.
     let bench_inp = spec.bench_input();
     if !spec.is_valid(&bench_inp) {
         return Err(HarnessError::BoundaryRejected {

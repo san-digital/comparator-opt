@@ -1,10 +1,12 @@
 /-!
-# Pinned Reference Specifications and Theorem Targets
+# Pinned definitions and theorem statements
 
-Every block delimited by `@comparator:begin` and `@comparator:end` is hashed with SHA-256
-and locked in `comparator.lock`. An automated optimizer may edit `Proofs.lean` and the fast
-implementations in `src/kernels.rs`, while any edit to these reference definitions or theorem
-targets is rejected by `comparator-opt verify`.
+Every block between `@comparator:begin` and `@comparator:end` is hashed with SHA-256 and
+recorded in `comparator.lock`, so `comparator-opt verify` fails if one changes.
+
+The `ref*` definitions restate the Rust references in `src/kernels.rs`, and the `swar*` and
+`fast*` definitions restate the Rust fast paths. Both were written out by hand. The proofs are
+about these Lean copies. Nothing checks mechanically that the Rust code still matches them.
 -/
 
 namespace ComparatorOpt

@@ -1,4 +1,6 @@
-/// Pure-Rust FIPS 180-4 SHA-256 digest used for Challenge Lock pinning.
+//! A small SHA-256 (FIPS 180-4) implementation, so the crate has no dependencies.
+
+/// Returns the SHA-256 digest of `data`.
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
@@ -45,6 +47,7 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     out
 }
 
+/// Returns the SHA-256 digest of `data` as 64 lowercase hex characters.
 pub fn sha256_hex(data: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let digest = sha256(data);

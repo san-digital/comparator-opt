@@ -1,3 +1,11 @@
+//! The challenge lock: SHA-256 digests of the pinned `@comparator` blocks, and the check of
+//! the Lean axiom log.
+//!
+//! The lock shows that the text between the markers has not changed. It does not show that
+//! the compiler builds that text (the rest of the file can, for example, wrap a block in a
+//! string literal), and anyone who can edit the repository can regenerate it. It is a review
+//! aid: see "What the lock protects" in the README.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
@@ -5,17 +13,20 @@ use std::path::Path;
 
 use crate::sha256::sha256_hex;
 
-/// Allowed foundational Lean 4 kernel axioms in zero-trust comparator mode.
+/// The standard Lean 4 axioms a proof may depend on. Anything else (`sorryAx`,
+/// `Lean.ofReduceBool` from `native_decide`, `Lean.trustCompiler`, or a custom `axiom`) is
+/// rejected.
 pub const ALLOWED_LEAN_AXIOMS: &[&str] = &["propext", "Classical.choice", "Quot.sound"];
 
-/// Files scanned for `@comparator` blocks, as `(kind, repo-relative path)`.
+/// Files the `comparator-opt` binary scans for `@comparator` blocks in this repository, as
+/// `(kind, repo-relative path)`. Pass your own list to [`build_lockfile`] for other projects.
 pub const PIN_TARGETS: &[(&str, &str)] = &[
     ("rust-ref", "src/kernels.rs"),
     ("lean-challenge", "lean/ComparatorOpt/Challenge.lean"),
     ("lean-challenge", "lean/ComparatorOpt/Check.lean"),
 ];
 
-/// Theorems whose axiom footprint must appear in `lean/axioms.txt`.
+/// Theorems from this repository's Lean proofs that must appear in `lean/axioms.txt`.
 ///
 /// The `ComparatorOpt.Audit.*` theorems live in the pinned block of `Check.lean` and restate
 /// each proof at its pinned `Challenge.lean` type, so their footprint covers whatever term the
@@ -33,7 +44,7 @@ pub const REQUIRED_THEOREMS: &[&str] = &[
     "ComparatorOpt.Audit.mersenne31_fast_sound",
 ];
 
-/// Single pinned specification block inside a Rust reference file or Lean Challenge file.
+/// One pinned block: its kind, id, SHA-256 digest, and the file it was found in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChallengePin {
     pub kind: String,
@@ -42,7 +53,7 @@ pub struct ChallengePin {
     pub rel_path: String,
 }
 
-/// Deterministic Challenge Lock file (`comparator.lock`).
+/// The contents of a lock file such as `comparator.lock`. Pins are kept sorted by kind and id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LockFile {
     pub pins: Vec<ChallengePin>,
@@ -124,7 +135,11 @@ impl fmt::Display for LockError {
 impl std::error::Error for LockError {}
 
 /// Extracts all `@comparator:begin <id>` .. `@comparator:end <id>` blocks from `content`.
-/// Supports both Rust (`//`) and Lean (`--`) line comments.
+///
+/// Markers are line comments in Rust (`//`) or Lean (`--`) style. The digest covers the lines
+/// between the markers, with line endings normalized to `\n` so CRLF and LF checkouts agree.
+/// Nested, unclosed, mismatched, or duplicate blocks are errors. The scan is line-based and does
+/// not parse Rust or Lean, so a marker inside a string literal or block comment still counts.
 pub fn extract_pins_from_str(
     kind: &str,
     rel_path: &str,
@@ -205,7 +220,7 @@ fn parse_marker<'a>(trimmed: &'a str, action: &str) -> Option<&'a str> {
     None
 }
 
-/// Scans the given `(kind, rel_path)` pairs under `root` and builds a `LockFile`.
+/// Scans the given `(kind, rel_path)` pairs under `root` and builds a [`LockFile`].
 pub fn build_lockfile(root: &Path, targets: &[(&str, &str)]) -> Result<LockFile, LockError> {
     let mut pins = Vec::new();
     let mut seen = BTreeSet::new();
@@ -226,6 +241,7 @@ pub fn build_lockfile(root: &Path, targets: &[(&str, &str)]) -> Result<LockFile,
 }
 
 impl LockFile {
+    /// Renders the lock file text, one `pin <kind> <id> <sha256> <path>` line per block.
     pub fn render(&self) -> String {
         let mut out = String::from("# comparator-opt challenge lock (version 1)\nversion = 1\n");
         for p in &self.pins {
@@ -237,6 +253,7 @@ impl LockFile {
         out
     }
 
+    /// Parses lock file text produced by [`LockFile::render`].
     pub fn parse(src: &str) -> Result<Self, LockError> {
         let mut pins = Vec::new();
         let mut saw_version = false;
@@ -294,7 +311,8 @@ impl LockFile {
         Ok(Self { pins })
     }
 
-    /// Verifies that `actual` matches every locked `(kind, id, sha256)` entry without tampering.
+    /// Checks that `actual` has exactly the same `(kind, id)` pins as `self`, with the same
+    /// digests. The file path column is informational and is not compared.
     pub fn verify_against(&self, actual: &Self) -> Result<(), LockError> {
         let locked_map: BTreeMap<(&str, &str), &ChallengePin> = self
             .pins
@@ -336,8 +354,11 @@ impl LockFile {
     }
 }
 
-/// Parses `#print axioms` lines from Lean 4 and rejects `sorryAx`, `Lean.ofReduceBool`
-/// (`native_decide`), `Lean.trustCompiler`, and any non-standard user axioms.
+/// Reads Lean 4 `#print axioms` output and fails if any theorem depends on an axiom outside
+/// [`ALLOWED_LEAN_AXIOMS`], or if a theorem in `required_theorems` is missing.
+///
+/// This only reads text. It is meaningful when the log was just produced by Lean from the
+/// current proofs, as `lean/replay.sh` does in CI.
 ///
 /// Lean wraps long axiom lists across several lines (`[propext,` / ` sorryAx,` / ...), so a
 /// list is read until its closing `]`.

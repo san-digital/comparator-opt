@@ -1,12 +1,17 @@
+//! The three example kernels. Each has a readable `ref_*` function and a `KernelSpec` impl
+//! inside a pinned `@comparator` block, and a `fast_*` function outside it.
+
 use crate::harness::{KernelSpec, SplitMix64};
 
 // Each `@comparator` block below pins a kernel's reference function together with its
 // `KernelSpec` wiring: the validity guard, which function `eval_ref` calls, the boundary
 // vectors, the sampled corpus, and the benchmark input. `eval_fast` only delegates to the
-// unpinned `fast_*` function after the block, which is the one part open to optimizers.
+// unpinned `fast_*` function after the block, which is the part meant to change. Changes to
+// anything else in this file still need review: code outside a block can change what the
+// compiler builds from it (see "What the lock protects" in the README).
 
 // ============================================================================
-// Kernel 1: Branchless 8-Lane SWAR ASCII Case-Folding
+// Kernel 1: ASCII lowercase, 8 bytes at a time (SWAR)
 // ============================================================================
 
 // @comparator:begin ascii_lower_ref
@@ -79,7 +84,7 @@ impl KernelSpec for AsciiLowerKernel {
 }
 // @comparator:end ascii_lower_ref
 
-/// Carry-free 8-byte parallel SWAR case-fold over a `u64` word.
+/// Lowercases the ASCII letters in all 8 bytes of a `u64` at once. Other bytes are unchanged.
 ///
 /// `lean/ComparatorOpt/Proofs.lean` proves the per-lane formula exact for all 256 byte values
 /// (`ascii_lower_byte_sound`). Lane independence in the packed word rests on the carry-free
@@ -101,6 +106,7 @@ pub fn swar_ascii_lower_u64(w: u64) -> u64 {
     w | (upper_msb >> 2)
 }
 
+/// Fast version of [`ref_ascii_lower`]: applies [`swar_ascii_lower_u64`] to each 8-byte chunk.
 #[inline(never)]
 pub fn fast_ascii_lower_swar(input: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; input.len()];
@@ -123,7 +129,7 @@ pub fn fast_ascii_lower_swar(input: &[u8]) -> Vec<u8> {
 }
 
 // ============================================================================
-// Kernel 2: Blocked 8-Lane SWAR UTF-8 Non-Continuation Counter
+// Kernel 2: count UTF-8 characters (non-continuation bytes), 8 bytes at a time
 // ============================================================================
 
 // @comparator:begin utf8_count_ref
@@ -193,7 +199,8 @@ impl KernelSpec for Utf8CountKernel {
 }
 // @comparator:end utf8_count_ref
 
-/// Counts non-continuation UTF-8 codepoint start bytes using 31-word SWAR blocks.
+/// Fast version of [`ref_utf8_char_count`]: counts bytes that are not UTF-8 continuation bytes
+/// (`0b10xx_xxxx`), 8 at a time. For valid UTF-8 this is the number of characters.
 ///
 /// Within each block of at most `31` `u64` words (`31 * 8 = 248 < 256` bytes), the sum
 /// across all 8 byte accumulators never exceeds `248`, so multiplying by `0x0101_0101_0101_0101`
@@ -236,7 +243,7 @@ pub fn fast_utf8_char_count_swar(bytes: &[u8]) -> usize {
 }
 
 // ============================================================================
-// Kernel 3: Division-Free Mersenne-31 Field Product Reduction
+// Kernel 3: reduce a product modulo the Mersenne prime 2^31 - 1 without `%`
 // ============================================================================
 
 // @comparator:begin mersenne31_mod_ref
@@ -321,9 +328,12 @@ impl KernelSpec for Mersenne31BatchKernel {
 }
 // @comparator:end mersenne31_mod_ref
 
-/// Division-free two-fold reduction modulo `2^31 - 1` for all `x < (2^31 - 1)^2`.
+/// Computes `x % (2^31 - 1)` with two shift-and-add folds and no division, for
+/// `x < (2^31 - 1)^2` (any product of two reduced values). Outside that range the result can be
+/// wrong.
 ///
-/// Proven exact for all `x < (2^31 - 1)^2` in `lean/ComparatorOpt/Proofs.lean`.
+/// `lean/ComparatorOpt/Proofs.lean` proves the same formula, written in Lean over `Nat`, exact
+/// on that range. The proof is about the Lean copy, not this function.
 #[inline]
 pub fn fast_mersenne31_mod(x: u64) -> u32 {
     const P: u64 = 0x7fff_ffff;

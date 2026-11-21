@@ -30,6 +30,15 @@ jobs:
         run: |
           cargo doc --no-deps --all-features
           cargo package --locked
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Compile, kernel-replay, and axiom-audit the Lean proofs
+        run: ./lean/replay.sh
+      - name: Committed axiom log matches the fresh replay
+        run: git diff --exit-code -- lean/axioms.txt
       - name: Challenge Lock and differential verification
         run: cargo run --release -- verify .
       - name: Independent Python SHA-256 Challenge Lock cross-check

@@ -5,21 +5,8 @@ use std::process::ExitCode;
 
 use comparator_opt::{
     build_lockfile, verify_kernel, verify_lean_axiom_log, AsciiLowerKernel, LockFile,
-    Mersenne31BatchKernel, Utf8CountKernel, VerifyConfig,
+    Mersenne31BatchKernel, Utf8CountKernel, VerifyConfig, PIN_TARGETS, REQUIRED_THEOREMS,
 };
-
-const PIN_TARGETS: &[(&str, &str)] = &[
-    ("rust-ref", "src/kernels.rs"),
-    ("lean-challenge", "lean/ComparatorOpt/Challenge.lean"),
-];
-
-const REQUIRED_THEOREMS: &[&str] = &[
-    "ComparatorOpt.ascii_lower_byte_sound",
-    "ComparatorOpt.swar_no_carry_add_sound",
-    "ComparatorOpt.utf8_lead_bit_sound",
-    "ComparatorOpt.horizontal_byte_sum_sound",
-    "ComparatorOpt.mersenne31_fast_sound",
-];
 
 fn usage() -> &'static str {
     "usage:\n  comparator-opt lock [repo-root]\n  comparator-opt verify [repo-root]\n  comparator-opt bench\n"

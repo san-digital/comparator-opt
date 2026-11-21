@@ -3,3 +3,8 @@
 'ComparatorOpt.utf8_lead_bit_sound' depends on axioms: [propext, Quot.sound]
 'ComparatorOpt.horizontal_byte_sum_sound' depends on axioms: [propext, Quot.sound]
 'ComparatorOpt.mersenne31_fast_sound' depends on axioms: [propext, Quot.sound]
+'ComparatorOpt.Audit.ascii_lower_byte_sound' depends on axioms: [propext, Quot.sound]
+'ComparatorOpt.Audit.swar_no_carry_add_sound' depends on axioms: [propext, Quot.sound]
+'ComparatorOpt.Audit.utf8_lead_bit_sound' depends on axioms: [propext, Quot.sound]
+'ComparatorOpt.Audit.horizontal_byte_sum_sound' depends on axioms: [propext, Quot.sound]
+'ComparatorOpt.Audit.mersenne31_fast_sound' depends on axioms: [propext, Quot.sound]

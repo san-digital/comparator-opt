@@ -8,6 +8,31 @@ use crate::sha256::sha256_hex;
 /// Allowed foundational Lean 4 kernel axioms in zero-trust comparator mode.
 pub const ALLOWED_LEAN_AXIOMS: &[&str] = &["propext", "Classical.choice", "Quot.sound"];
 
+/// Files scanned for `@comparator` blocks, as `(kind, repo-relative path)`.
+pub const PIN_TARGETS: &[(&str, &str)] = &[
+    ("rust-ref", "src/kernels.rs"),
+    ("lean-challenge", "lean/ComparatorOpt/Challenge.lean"),
+    ("lean-challenge", "lean/ComparatorOpt/Check.lean"),
+];
+
+/// Theorems whose axiom footprint must appear in `lean/axioms.txt`.
+///
+/// The `ComparatorOpt.Audit.*` theorems live in the pinned block of `Check.lean` and restate
+/// each proof at its pinned `Challenge.lean` type, so their footprint covers whatever term the
+/// optimizer-editable `Proofs.lean` supplies.
+pub const REQUIRED_THEOREMS: &[&str] = &[
+    "ComparatorOpt.ascii_lower_byte_sound",
+    "ComparatorOpt.swar_no_carry_add_sound",
+    "ComparatorOpt.utf8_lead_bit_sound",
+    "ComparatorOpt.horizontal_byte_sum_sound",
+    "ComparatorOpt.mersenne31_fast_sound",
+    "ComparatorOpt.Audit.ascii_lower_byte_sound",
+    "ComparatorOpt.Audit.swar_no_carry_add_sound",
+    "ComparatorOpt.Audit.utf8_lead_bit_sound",
+    "ComparatorOpt.Audit.horizontal_byte_sum_sound",
+    "ComparatorOpt.Audit.mersenne31_fast_sound",
+];
+
 /// Single pinned specification block inside a Rust reference file or Lean Challenge file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChallengePin {
@@ -313,42 +338,66 @@ impl LockFile {
 
 /// Parses `#print axioms` lines from Lean 4 and rejects `sorryAx`, `Lean.ofReduceBool`
 /// (`native_decide`), `Lean.trustCompiler`, and any non-standard user axioms.
+///
+/// Lean wraps long axiom lists across several lines (`[propext,` / ` sorryAx,` / ...), so a
+/// list is read until its closing `]`.
 pub fn verify_lean_axiom_log(
     axiom_log: &str,
     required_theorems: &[&str],
 ) -> Result<BTreeMap<String, Vec<String>>, LockError> {
     let mut parsed: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut lines = axiom_log.lines().enumerate();
 
-    for raw in axiom_log.lines() {
+    while let Some((idx, raw)) = lines.next() {
         let line = raw.trim();
-        if let Some(rest) = line.strip_prefix('\'') {
-            if let Some((thm, tail)) = rest.split_once('\'') {
-                let tail = tail.trim();
-                if tail == "does not depend on any axioms" {
-                    parsed.insert(thm.to_owned(), Vec::new());
-                } else if let Some(list_part) = tail.strip_prefix("depends on axioms:") {
-                    let clean = list_part
-                        .trim()
-                        .trim_start_matches('[')
-                        .trim_end_matches(']');
-                    let axioms: Vec<String> = clean
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_owned)
-                        .collect();
-                    for ax in &axioms {
-                        if !ALLOWED_LEAN_AXIOMS.contains(&ax.as_str()) {
-                            return Err(LockError::DisallowedAxiom {
-                                theorem: thm.to_owned(),
-                                axiom: ax.clone(),
-                            });
-                        }
-                    }
-                    parsed.insert(thm.to_owned(), axioms);
-                }
+        let Some(rest) = line.strip_prefix('\'') else {
+            continue;
+        };
+        let Some((thm, tail)) = rest.split_once('\'') else {
+            continue;
+        };
+        let tail = tail.trim();
+        if tail == "does not depend on any axioms" {
+            parsed.insert(thm.to_owned(), Vec::new());
+            continue;
+        }
+        let Some(list_part) = tail.strip_prefix("depends on axioms:") else {
+            continue;
+        };
+
+        let mut list = list_part.trim().to_owned();
+        while !list.ends_with(']') {
+            let Some((_, cont)) = lines.next() else {
+                return Err(LockError::MalformedLock {
+                    line: idx + 1,
+                    detail: format!("unterminated axiom list for theorem '{thm}'"),
+                });
+            };
+            list.push(' ');
+            list.push_str(cont.trim());
+        }
+        let Some(inner) = list.strip_prefix('[').and_then(|s| s.strip_suffix(']')) else {
+            return Err(LockError::MalformedLock {
+                line: idx + 1,
+                detail: format!("malformed axiom list for theorem '{thm}'"),
+            });
+        };
+
+        let axioms: Vec<String> = inner
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        for ax in &axioms {
+            if !ALLOWED_LEAN_AXIOMS.contains(&ax.as_str()) {
+                return Err(LockError::DisallowedAxiom {
+                    theorem: thm.to_owned(),
+                    axiom: ax.clone(),
+                });
             }
         }
+        parsed.insert(thm.to_owned(), axioms);
     }
 
     for &req in required_theorems {

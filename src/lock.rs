@@ -183,12 +183,18 @@ fn parse_marker<'a>(trimmed: &'a str, action: &str) -> Option<&'a str> {
 /// Scans the given `(kind, rel_path)` pairs under `root` and builds a `LockFile`.
 pub fn build_lockfile(root: &Path, targets: &[(&str, &str)]) -> Result<LockFile, LockError> {
     let mut pins = Vec::new();
+    let mut seen = BTreeSet::new();
     for &(kind, rel) in targets {
         let full = root.join(rel);
         let content = fs::read_to_string(&full)
             .map_err(|e| LockError::Io(format!("{}: {e}", full.display())))?;
-        let mut extracted = extract_pins_from_str(kind, rel, &content)?;
-        pins.append(&mut extracted);
+        let extracted = extract_pins_from_str(kind, rel, &content)?;
+        for p in extracted {
+            if !seen.insert((p.kind.clone(), p.id.clone())) {
+                return Err(LockError::DuplicateId { id: p.id });
+            }
+            pins.push(p);
+        }
     }
     pins.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.id.cmp(&b.id)));
     Ok(LockFile { pins })
@@ -226,10 +232,24 @@ impl LockFile {
                 });
             };
             let parts: Vec<&str> = rest.split_whitespace().collect();
-            if parts.len() != 4 || parts[2].len() != 64 {
+            if parts.len() != 4
+                || parts[2].len() != 64
+                || !parts[2]
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            {
                 return Err(LockError::MalformedLock {
                     line: ln,
-                    detail: "expected 'pin <kind> <id> <sha256> <rel_path>'".to_owned(),
+                    detail: "expected 'pin <kind> <id> <64-char-lowercase-hex-sha256> <rel_path>'"
+                        .to_owned(),
+                });
+            }
+            if pins
+                .iter()
+                .any(|p: &ChallengePin| p.kind == parts[0] && p.id == parts[1])
+            {
+                return Err(LockError::DuplicateId {
+                    id: parts[1].to_owned(),
                 });
             }
             pins.push(ChallengePin {

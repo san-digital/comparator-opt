@@ -24,6 +24,12 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo test --release
+      - name: Documentation and package check
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo doc --no-deps --all-features
+          cargo package --locked
       - name: Challenge Lock and differential verification
         run: cargo run --release -- verify .
       - name: Independent Python SHA-256 Challenge Lock cross-check

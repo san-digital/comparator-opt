@@ -211,8 +211,22 @@ pub fn verify_kernel<K: KernelSpec>(
 
     // 3. Calibrated black-box timing comparison.
     let bench_inp = spec.bench_input();
-    assert!(spec.is_valid(&bench_inp));
-    assert_eq!(spec.eval_ref(&bench_inp), spec.eval_fast(&bench_inp));
+    if !spec.is_valid(&bench_inp) {
+        return Err(HarnessError::BoundaryRejected {
+            kernel: kname,
+            index: boundaries.len(),
+        });
+    }
+    let bench_ref = spec.eval_ref(&bench_inp);
+    let bench_fast = spec.eval_fast(&bench_inp);
+    if bench_fast != bench_ref {
+        return Err(HarnessError::OutputMismatch {
+            kernel: kname,
+            phase: "bench",
+            index: 0,
+            detail: format!("expected={bench_ref:?}, got={bench_fast:?}"),
+        });
+    }
 
     let iters = cfg.bench_iters.max(1);
     let t_ref = Instant::now();

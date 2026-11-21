@@ -6,9 +6,11 @@ rust-version = "1.81"
 license = "Apache-2.0"
 description = "Zero-trust superoptimization harness and cryptographic challenge lock pairing simple reference specs with verified fast paths."
 repository = "https://github.com/san-digital/comparator-opt"
+homepage = "https://github.com/san-digital/comparator-opt"
+documentation = "https://docs.rs/comparator-opt"
 readme = "README.md"
 keywords = ["verification", "optimization", "swar", "cryptography", "testing"]
-categories = ["development-tools::testing", "algorithms", "mathematics"]
+categories = ["development-tools::testing", "command-line-utilities", "algorithms", "mathematics"]
 
 [[bin]]
 name = "comparator-opt"

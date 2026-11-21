@@ -2,7 +2,20 @@
 
 Zero-trust superoptimization harness and cryptographic challenge lock for pairing short, readable reference functions with verified bit-twiddling fast paths.
 
-Zero runtime dependencies. `#![forbid(unsafe_code)]`. Stock Lean 4 proofs (`Init` only, replayed via `leanchecker` with zero `sorryAx` and zero `native_decide`) in [`lean/ComparatorOpt/`](lean/ComparatorOpt). Architecture details in [`PROOF.md`](PROOF.md).
+Zero runtime dependencies. `#![forbid(unsafe_code)]`. Stock Lean 4 proofs (`Init` only, replayed via `leanchecker` with zero `sorryAx` and zero `native_decide`) in [`lean/ComparatorOpt/`](https://github.com/san-digital/comparator-opt/tree/main/lean/ComparatorOpt). Architecture details in [`PROOF.md`](https://github.com/san-digital/comparator-opt/blob/main/PROOF.md).
+
+## Installation
+
+```sh
+cargo install comparator-opt
+```
+
+Or as a library dependency:
+
+```toml
+[dependencies]
+comparator-opt = "0.1"
+```
 
 ## Why This Exists
 
@@ -13,7 +26,7 @@ Automated optimizers and coding agents can turn a 6-line scalar loop into a 10x-
 
 `comparator-opt` adapts the **Challenge + Comparator** verification split to software kernels:
 
-- **Humans maintain only the trivial reference specification:** Short `ref_*` functions, `ValidInput` guards, and Lean theorem statements sit inside `@comparator:begin <id>` .. `@comparator:end <id>` markers locked by FIPS 180-4 SHA-256 digests in [`comparator.lock`](comparator.lock).
+- **Humans maintain only the trivial reference specification:** Short `ref_*` functions, `ValidInput` guards, and Lean theorem statements sit inside `@comparator:begin <id>` .. `@comparator:end <id>` markers locked by FIPS 180-4 SHA-256 digests in [`comparator.lock`](https://github.com/san-digital/comparator-opt/blob/main/comparator.lock).
 - **Optimizers supply the fast path and proof:** Any edit to a locked reference block, any disallowed Lean axiom (`sorryAx`, `Lean.ofReduceBool`), any vacuous `ValidInput` guard, or any differential mismatch fails `comparator-opt verify`.
 
 ## Measured Speedups (Built-In Verified Kernels)
@@ -88,4 +101,4 @@ To recompile and kernel-replay the Lean 4 proofs from scratch (requires stock Le
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE).
+Apache-2.0. See [`LICENSE`](https://github.com/san-digital/comparator-opt/blob/main/LICENSE).

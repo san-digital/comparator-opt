@@ -1,5 +1,10 @@
 use crate::harness::{KernelSpec, SplitMix64};
 
+// Each `@comparator` block below pins a kernel's reference function together with its
+// `KernelSpec` wiring: the validity guard, which function `eval_ref` calls, the boundary
+// vectors, the sampled corpus, and the benchmark input. `eval_fast` only delegates to the
+// unpinned `fast_*` function after the block, which is the one part open to optimizers.
+
 // ============================================================================
 // Kernel 1: Branchless 8-Lane SWAR ASCII Case-Folding
 // ============================================================================
@@ -19,47 +24,6 @@ pub fn ref_ascii_lower(input: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(input.len());
     for &b in input {
         out.push(ref_ascii_lower_byte(b));
-    }
-    out
-}
-// @comparator:end ascii_lower_ref
-
-/// Carry-free 8-byte parallel SWAR case-fold over a `u64` word.
-///
-/// Proven lane-exact for all `2^64` words in `lean/ComparatorOpt/Proofs.lean`:
-/// - `low7 = w & 0x7f7f_7f7f_7f7f_7f7f` clears bit 7 so per-lane sums stay `<= 190 < 256`
-///   and never carry into neighboring lanes.
-/// - `ge_a = low7 + 0x3f3f_3f3f_3f3f_3f3f` sets bit 7 iff `(b & 0x7f) >= 65` (`'A'`).
-/// - `gt_z = low7 + 0x2525_2525_2525_2525` sets bit 7 iff `(b & 0x7f) >= 91` (`'Z' + 1`).
-/// - Masking with `!w & 0x8080_8080_8080_8080` excludes non-ASCII bytes (`b >= 128`).
-#[inline]
-pub fn swar_ascii_lower_u64(w: u64) -> u64 {
-    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
-    const MSB: u64 = 0x8080_8080_8080_8080;
-    let low7 = w & LOW7;
-    let ge_a = low7.wrapping_add(0x3f3f_3f3f_3f3f_3f3f);
-    let gt_z = low7.wrapping_add(0x2525_2525_2525_2525);
-    let upper_msb = ge_a & !gt_z & !w & MSB;
-    w | (upper_msb >> 2)
-}
-
-#[inline(never)]
-pub fn fast_ascii_lower_swar(input: &[u8]) -> Vec<u8> {
-    let mut out = vec![0u8; input.len()];
-    let mut in_chunks = input.chunks_exact(8);
-    let mut out_chunks = out.chunks_exact_mut(8);
-    for (src, dst) in (&mut in_chunks).zip(&mut out_chunks) {
-        let w = u64::from_le_bytes([
-            src[0], src[1], src[2], src[3], src[4], src[5], src[6], src[7],
-        ]);
-        dst.copy_from_slice(&swar_ascii_lower_u64(w).to_le_bytes());
-    }
-    for (&b, dst) in in_chunks
-        .remainder()
-        .iter()
-        .zip(out_chunks.into_remainder().iter_mut())
-    {
-        *dst = swar_ascii_lower_u64(b as u64) as u8;
     }
     out
 }
@@ -113,6 +77,50 @@ impl KernelSpec for AsciiLowerKernel {
         v
     }
 }
+// @comparator:end ascii_lower_ref
+
+/// Carry-free 8-byte parallel SWAR case-fold over a `u64` word.
+///
+/// `lean/ComparatorOpt/Proofs.lean` proves the per-lane formula exact for all 256 byte values
+/// (`ascii_lower_byte_sound`). Lane independence in the packed word rests on the carry-free
+/// argument below, which is checked by tests on every byte in every lane position and is not
+/// itself formalized in Lean:
+/// - `low7 = w & 0x7f7f_7f7f_7f7f_7f7f` clears bit 7 so per-lane sums stay `<= 190 < 256`
+///   and never carry into neighboring lanes.
+/// - `ge_a = low7 + 0x3f3f_3f3f_3f3f_3f3f` sets bit 7 iff `(b & 0x7f) >= 65` (`'A'`).
+/// - `gt_z = low7 + 0x2525_2525_2525_2525` sets bit 7 iff `(b & 0x7f) >= 91` (`'Z' + 1`).
+/// - Masking with `!w & 0x8080_8080_8080_8080` excludes non-ASCII bytes (`b >= 128`).
+#[inline]
+pub fn swar_ascii_lower_u64(w: u64) -> u64 {
+    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    const MSB: u64 = 0x8080_8080_8080_8080;
+    let low7 = w & LOW7;
+    let ge_a = low7.wrapping_add(0x3f3f_3f3f_3f3f_3f3f);
+    let gt_z = low7.wrapping_add(0x2525_2525_2525_2525);
+    let upper_msb = ge_a & !gt_z & !w & MSB;
+    w | (upper_msb >> 2)
+}
+
+#[inline(never)]
+pub fn fast_ascii_lower_swar(input: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; input.len()];
+    let mut in_chunks = input.chunks_exact(8);
+    let mut out_chunks = out.chunks_exact_mut(8);
+    for (src, dst) in (&mut in_chunks).zip(&mut out_chunks) {
+        let w = u64::from_le_bytes([
+            src[0], src[1], src[2], src[3], src[4], src[5], src[6], src[7],
+        ]);
+        dst.copy_from_slice(&swar_ascii_lower_u64(w).to_le_bytes());
+    }
+    for (&b, dst) in in_chunks
+        .remainder()
+        .iter()
+        .zip(out_chunks.into_remainder().iter_mut())
+    {
+        *dst = swar_ascii_lower_u64(b as u64) as u8;
+    }
+    out
+}
 
 // ============================================================================
 // Kernel 2: Blocked 8-Lane SWAR UTF-8 Non-Continuation Counter
@@ -133,49 +141,6 @@ pub fn ref_utf8_char_count(bytes: &[u8]) -> usize {
         }
     }
     count
-}
-// @comparator:end utf8_count_ref
-
-/// Counts non-continuation UTF-8 codepoint start bytes using 31-word SWAR blocks.
-///
-/// Within each block of at most `31` `u64` words (`31 * 8 = 248 < 256` bytes), the sum
-/// across all 8 byte accumulators never exceeds `248`, so multiplying by `0x0101_0101_0101_0101`
-/// and shifting right by `56` recovers the exact block count without overflow.
-#[inline(never)]
-pub fn fast_utf8_char_count_swar(bytes: &[u8]) -> usize {
-    const MSB: u64 = 0x8080_8080_8080_8080;
-    const ONES: u64 = 0x0101_0101_0101_0101;
-
-    let mut total = 0usize;
-    let blocks = bytes.chunks_exact(31 * 8);
-    let after_blocks = blocks.remainder();
-
-    for block in blocks {
-        let mut safe_acc = 0u64;
-        for src in block.chunks_exact(8) {
-            let w = u64::from_le_bytes([
-                src[0], src[1], src[2], src[3], src[4], src[5], src[6], src[7],
-            ]);
-            safe_acc = safe_acc.wrapping_add((((!w) | (w << 1)) & MSB) >> 7);
-        }
-        total += ((safe_acc.wrapping_mul(ONES)) >> 56) as usize;
-    }
-
-    let tail_words = after_blocks.chunks_exact(8);
-    let rem = tail_words.remainder();
-    let mut tail_acc = 0u64;
-    for src in tail_words {
-        let w = u64::from_le_bytes([
-            src[0], src[1], src[2], src[3], src[4], src[5], src[6], src[7],
-        ]);
-        tail_acc = tail_acc.wrapping_add((((!w) | (w << 1)) & MSB) >> 7);
-    }
-    total += ((tail_acc.wrapping_mul(ONES)) >> 56) as usize;
-
-    for &b in rem {
-        total += ((((!b) | (b << 1)) & 0x80) >> 7) as usize;
-    }
-    total
 }
 
 pub struct Utf8CountKernel;
@@ -226,6 +191,49 @@ impl KernelSpec for Utf8CountKernel {
             .repeat(280)
     }
 }
+// @comparator:end utf8_count_ref
+
+/// Counts non-continuation UTF-8 codepoint start bytes using 31-word SWAR blocks.
+///
+/// Within each block of at most `31` `u64` words (`31 * 8 = 248 < 256` bytes), the sum
+/// across all 8 byte accumulators never exceeds `248`, so multiplying by `0x0101_0101_0101_0101`
+/// and shifting right by `56` recovers the exact block count without overflow.
+#[inline(never)]
+pub fn fast_utf8_char_count_swar(bytes: &[u8]) -> usize {
+    const MSB: u64 = 0x8080_8080_8080_8080;
+    const ONES: u64 = 0x0101_0101_0101_0101;
+
+    let mut total = 0usize;
+    let blocks = bytes.chunks_exact(31 * 8);
+    let after_blocks = blocks.remainder();
+
+    for block in blocks {
+        let mut safe_acc = 0u64;
+        for src in block.chunks_exact(8) {
+            let w = u64::from_le_bytes([
+                src[0], src[1], src[2], src[3], src[4], src[5], src[6], src[7],
+            ]);
+            safe_acc = safe_acc.wrapping_add((((!w) | (w << 1)) & MSB) >> 7);
+        }
+        total += ((safe_acc.wrapping_mul(ONES)) >> 56) as usize;
+    }
+
+    let tail_words = after_blocks.chunks_exact(8);
+    let rem = tail_words.remainder();
+    let mut tail_acc = 0u64;
+    for src in tail_words {
+        let w = u64::from_le_bytes([
+            src[0], src[1], src[2], src[3], src[4], src[5], src[6], src[7],
+        ]);
+        tail_acc = tail_acc.wrapping_add((((!w) | (w << 1)) & MSB) >> 7);
+    }
+    total += ((tail_acc.wrapping_mul(ONES)) >> 56) as usize;
+
+    for &b in rem {
+        total += ((((!b) | (b << 1)) & 0x80) >> 7) as usize;
+    }
+    total
+}
 
 // ============================================================================
 // Kernel 3: Division-Free Mersenne-31 Field Product Reduction
@@ -242,19 +250,6 @@ pub fn ref_mersenne31_valid(x: u64) -> bool {
 #[inline(never)]
 pub fn ref_mersenne31_mod(x: u64) -> u32 {
     (x % MERSENNE31) as u32
-}
-// @comparator:end mersenne31_mod_ref
-
-/// Division-free two-fold reduction modulo `2^31 - 1` for all `x < (2^31 - 1)^2`.
-///
-/// Proven exact for all `x < (2^31 - 1)^2` in `lean/ComparatorOpt/Proofs.lean`.
-#[inline]
-pub fn fast_mersenne31_mod(x: u64) -> u32 {
-    const P: u64 = 0x7fff_ffff;
-    let t = (x & P) + (x >> 31);
-    let u = (t & P) + (t >> 31);
-    let mask = ((u == P) as u64).wrapping_neg();
-    (u & !mask) as u32
 }
 
 pub struct Mersenne31BatchKernel;
@@ -280,11 +275,7 @@ impl KernelSpec for Mersenne31BatchKernel {
     }
 
     fn eval_fast(&self, input: &Self::Input) -> Self::Output {
-        let mut acc = 0u64;
-        for &x in input {
-            acc = acc.wrapping_add(fast_mersenne31_mod(x) as u64);
-        }
-        acc
+        fast_mersenne31_batch(input)
     }
 
     fn boundary_inputs(&self) -> Vec<Self::Input> {
@@ -327,4 +318,27 @@ impl KernelSpec for Mersenne31BatchKernel {
         let p2 = MERSENNE31 * MERSENNE31;
         (0..4_096).map(|_| rng.next_u64() % p2).collect()
     }
+}
+// @comparator:end mersenne31_mod_ref
+
+/// Division-free two-fold reduction modulo `2^31 - 1` for all `x < (2^31 - 1)^2`.
+///
+/// Proven exact for all `x < (2^31 - 1)^2` in `lean/ComparatorOpt/Proofs.lean`.
+#[inline]
+pub fn fast_mersenne31_mod(x: u64) -> u32 {
+    const P: u64 = 0x7fff_ffff;
+    let t = (x & P) + (x >> 31);
+    let u = (t & P) + (t >> 31);
+    let mask = ((u == P) as u64).wrapping_neg();
+    (u & !mask) as u32
+}
+
+/// Batched fast path for `Mersenne31BatchKernel`: wrapping sum of `fast_mersenne31_mod`.
+#[inline(never)]
+pub fn fast_mersenne31_batch(input: &[u64]) -> u64 {
+    let mut acc = 0u64;
+    for &x in input {
+        acc = acc.wrapping_add(fast_mersenne31_mod(x) as u64);
+    }
+    acc
 }

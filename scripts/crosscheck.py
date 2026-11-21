@@ -42,6 +42,7 @@ def main() -> int:
     repo = pathlib.Path(__file__).resolve().parent.parent
     rust_pins = extract_blocks(repo / "src/kernels.rs")
     lean_pins = extract_blocks(repo / "lean/ComparatorOpt/Challenge.lean")
+    lean_pins.update(extract_blocks(repo / "lean/ComparatorOpt/Check.lean"))
 
     lock_entries: dict[tuple[str, str], str] = {}
     for raw in (repo / "comparator.lock").read_text(encoding="utf-8").splitlines():
@@ -50,7 +51,8 @@ def main() -> int:
             _, kind, pid, digest, _rel = line.split()
             lock_entries[(kind, pid)] = digest
 
-    assert len(lock_entries) == 6
+    assert len(lock_entries) == 7
+    assert len(rust_pins) + len(lean_pins) == 7
     for pid, digest in rust_pins.items():
         assert lock_entries[("rust-ref", pid)] == digest, f"mismatch on rust-ref {pid}"
     for pid, digest in lean_pins.items():

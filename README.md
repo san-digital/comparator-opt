@@ -26,8 +26,8 @@ Automated optimizers and coding agents can turn a 6-line scalar loop into a 10x-
 
 `comparator-opt` adapts the **Challenge + Comparator** verification split to software kernels:
 
-- **Humans maintain only the trivial reference specification:** Short `ref_*` functions, `ValidInput` guards, and Lean theorem statements sit inside `@comparator:begin <id>` .. `@comparator:end <id>` markers locked by FIPS 180-4 SHA-256 digests in [`comparator.lock`](https://github.com/san-digital/comparator-opt/blob/main/comparator.lock).
-- **Optimizers supply the fast path and proof:** Any edit to a locked reference block, any disallowed Lean axiom (`sorryAx`, `Lean.ofReduceBool`), any vacuous `ValidInput` guard, or any differential mismatch fails `comparator-opt verify`.
+- **Humans maintain only the trivial reference specification:** Short `ref_*` functions, each kernel's `KernelSpec` wiring (`ValidInput` guard, the reference `eval_ref` calls, boundary vectors, sampled corpus, and benchmark input), Lean theorem statements, and the binding of each proof to its statement sit inside `@comparator:begin <id>` .. `@comparator:end <id>` markers locked by FIPS 180-4 SHA-256 digests in [`comparator.lock`](https://github.com/san-digital/comparator-opt/blob/main/comparator.lock).
+- **Optimizers supply the fast path and proof:** Any edit to a locked block, any proof whose theorem no longer has its pinned type, any disallowed Lean axiom (`sorryAx`, `Lean.ofReduceBool`, custom axioms), any vacuous `ValidInput` guard, or any differential mismatch fails `lean/replay.sh` or `comparator-opt verify`.
 
 ## Measured Speedups (Built-In Verified Kernels)
 
@@ -50,8 +50,8 @@ cargo run --release -- verify .
 Output:
 
 ```text
-[1/3] challenge lock verified (6 pinned blocks match SHA-256)
-[2/3] Lean 4 axiom footprint verified (5 theorems, zero sorryAx / native_decide)
+[1/3] challenge lock verified (7 pinned blocks match SHA-256)
+[2/3] Lean 4 axiom footprint verified (10 theorems, zero sorryAx / native_decide)
 [3/3] running boundary, non-vacuity, and differential equivalence harness:
   kernel=ascii_lower_swar       valid=10000/10000 (10000 bps) ref= 13859.3 ns  fast=  1231.4 ns  speedup=11.25x
   kernel=utf8_char_count_swar   valid=10000/10000 (10000 bps) ref= 17220.8 ns  fast=   643.9 ns  speedup=26.74x
@@ -89,15 +89,13 @@ assert_eq!(fast_mersenne31_mod(prod), ref_mersenne31_mod(prod));
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 RUSTFLAGS="-D warnings" cargo test --release
+./lean/replay.sh
+git diff --exit-code -- lean/axioms.txt
 cargo run --release -- verify .
 python3 scripts/crosscheck.py
 ```
 
-To recompile and kernel-replay the Lean 4 proofs from scratch (requires stock Lean 4 only):
-
-```sh
-./lean/replay.sh
-```
+`lean/replay.sh` recompiles and kernel-replays the Lean 4 proofs from scratch and rewrites `lean/axioms.txt`. It needs only [elan](https://github.com/leanprover/elan): stock Lean 4 (`Init` only) at the version pinned in [`lean-toolchain`](https://github.com/san-digital/comparator-opt/blob/main/lean-toolchain). CI runs it before `verify`, so the axiom log that `verify` audits always comes from a fresh replay.
 
 ## License
 

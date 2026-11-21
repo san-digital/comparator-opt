@@ -1,0 +1,8 @@
+# comparator-opt challenge lock (version 1)
+version = 1
+pin lean-challenge ascii_lower_challenge 9a0eb7619bd661b3be18f473ce086bfe97d881aa7ae4702ad69da14177015774 lean/ComparatorOpt/Challenge.lean
+pin lean-challenge mersenne31_mod_challenge 361405bc243fef2308b2e7829ce190e79160b4429c87c8f1d5b1984c08823ed2 lean/ComparatorOpt/Challenge.lean
+pin lean-challenge utf8_count_challenge 2e4975838e77541b9052db7f53bc2efb47d5d95f7ac9efa0b1023b13558c6f07 lean/ComparatorOpt/Challenge.lean
+pin rust-ref ascii_lower_ref d3979d8b1cecce9909dacf9ca32a529dc831dd83b58a8b1d57a6d8c2b2e063be src/kernels.rs
+pin rust-ref mersenne31_mod_ref 7e812645eab4df68254a6ec71d60abfbac5dc6acff2d0e5688c0f237181795d2 src/kernels.rs
+pin rust-ref utf8_count_ref eef38a5fcd2632ad052bca6321c671578f148d33deee45e87fd1f76d8b234c42 src/kernels.rs

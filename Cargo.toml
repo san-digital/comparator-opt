@@ -1,0 +1,19 @@
+[package]
+name = "comparator-opt"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+license = "Apache-2.0"
+description = "Zero-trust superoptimization harness and cryptographic challenge lock pairing simple reference specs with verified fast paths."
+repository = "https://github.com/san-digital/comparator-opt"
+readme = "README.md"
+keywords = ["verification", "optimization", "swar", "cryptography", "testing"]
+categories = ["development-tools::testing", "algorithms", "mathematics"]
+
+[[bin]]
+name = "comparator-opt"
+path = "src/bin/comparator_opt.rs"
+
+[dependencies]
+
+[workspace]

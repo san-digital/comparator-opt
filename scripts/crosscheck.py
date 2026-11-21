@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Independent Python SHA-256 Challenge Lock and bit-exact kernel cross-check."""
+"""Second implementation of the comparator.lock check, using Python's hashlib.
+
+Recomputes the digest of every pinned block with an independent parser and SHA-256, compares
+them with comparator.lock, then runs `cargo run --release -- verify .` and checks that it
+finished (exit status 0 and a final "verify: ok" line). The last check catches a verify run
+that stops early with status 0; it does not stop deliberate tampering, because the fast paths
+run in the same process and could print that line themselves.
+"""
 
 from __future__ import annotations
 
@@ -58,12 +65,18 @@ def main() -> int:
     for pid, digest in lean_pins.items():
         assert lock_entries[("lean-challenge", pid)] == digest, f"mismatch on lean-challenge {pid}"
 
-    # Verify CLI end-to-end exit status.
-    subprocess.check_call(
+    # Run the CLI end to end and require that it reached the end.
+    result = subprocess.run(
         ["cargo", "run", "--release", "--quiet", "--bin", "comparator-opt", "--", "verify", "."],
         cwd=repo,
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
     )
-    print("crosscheck: ok (independent hashlib.sha256 lock verification and CLI verify passed)")
+    sys.stdout.write(result.stdout)
+    lines = result.stdout.splitlines()
+    assert lines and lines[-1] == "verify: ok", "verify exited 0 without finishing"
+    print("crosscheck: ok (hashlib digests match comparator.lock, and verify finished)")
     return 0
 
 

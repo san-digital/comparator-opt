@@ -1,10 +1,11 @@
 import ComparatorOpt.Challenge
 
 /-!
-# Machine-Checked Equivalence Proofs for Superoptimized Kernels
+# Proofs of the theorem statements in `Challenge.lean`
 
-Discharges every theorem target in `ComparatorOpt.Challenge` in stock Lean 4 (`Init`)
-with zero Mathlib dependency, zero `sorryAx`, and zero `native_decide` (`Lean.ofReduceBool`).
+Stock Lean 4 (`Init` only, no Mathlib), with no `sorry` and no `native_decide`.
+This file is not pinned, but it is compiled in CI and Lean can run code at compile time,
+so changes to it still need review.
 -/
 
 namespace ComparatorOpt

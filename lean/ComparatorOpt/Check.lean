@@ -1,7 +1,7 @@
 import ComparatorOpt.Proofs
 
 /-!
-# Statement Binding for Optimizer-Supplied Proofs
+# Binding each proof to its pinned statement
 
 `Proofs.lean` is open to optimizers, so a theorem there could be restated at a weaker type
 (for example `theorem ascii_lower_byte_sound : True := trivial`) and still pass an axiom

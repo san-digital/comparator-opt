@@ -1,3 +1,10 @@
+//! Command-line checker for the example kernels in this repository.
+//!
+//! The kernels and the list of pinned files are compiled into the binary, so the commands only
+//! make sense inside a checkout of the comparator-opt repository. Exit codes: `0` when every
+//! check passes, `1` when a check fails or a file cannot be read or written, `2` for a usage
+//! error.
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,35 +15,53 @@ use comparator_opt::{
     Mersenne31BatchKernel, Utf8CountKernel, VerifyConfig, PIN_TARGETS, REQUIRED_THEOREMS,
 };
 
+const REPO_HINT: &str =
+    "comparator-opt only checks a checkout of https://github.com/san-digital/comparator-opt";
+
 fn usage() -> &'static str {
-    "usage:\n  comparator-opt lock [repo-root]\n  comparator-opt verify [repo-root]\n  comparator-opt bench\n"
+    concat!(
+        "comparator-opt ",
+        env!("CARGO_PKG_VERSION"),
+        ": checks the example kernels in a checkout of the comparator-opt repository.\n",
+        "\n",
+        "usage:\n",
+        "  comparator-opt verify [repo-root]  check comparator.lock and lean/axioms.txt, then run the\n",
+        "                                     differential tests and benchmark\n",
+        "  comparator-opt lock [repo-root]    rewrite comparator.lock from the current pinned blocks\n",
+        "  comparator-opt bench               run the differential tests with more benchmark iterations\n",
+        "  comparator-opt --version\n",
+    )
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    if args.is_empty() {
+    let Some(cmd) = args.first() else {
         eprint!("{}", usage());
         return ExitCode::from(2);
+    };
+    let max_args = match cmd.as_str() {
+        "lock" | "verify" => 2,
+        _ => 1,
+    };
+    if args.len() > max_args {
+        eprintln!("error: too many arguments for '{cmd}'\n{}", usage());
+        return ExitCode::from(2);
     }
+    let root = args
+        .get(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
 
-    match args[0].as_str() {
-        "lock" => {
-            let root = args
-                .get(1)
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."));
-            run_lock(&root)
-        }
-        "verify" => {
-            let root = args
-                .get(1)
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."));
-            run_verify(&root)
-        }
+    match cmd.as_str() {
+        "lock" => run_lock(&root),
+        "verify" => run_verify(&root),
         "bench" => run_bench(),
         "-h" | "--help" | "help" => {
             print!("{}", usage());
+            ExitCode::SUCCESS
+        }
+        "-V" | "--version" => {
+            println!("comparator-opt {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         other => {
@@ -50,7 +75,7 @@ fn run_lock(root: &Path) -> ExitCode {
     let lock = match build_lockfile(root, PIN_TARGETS) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("error: {e}");
+            eprintln!("error: {e}\n({REPO_HINT})");
             return ExitCode::from(1);
         }
     };
@@ -60,7 +85,7 @@ fn run_lock(root: &Path) -> ExitCode {
         return ExitCode::from(1);
     }
     println!(
-        "wrote {} ({} pinned specification blocks)",
+        "wrote {} ({} pinned blocks); review the pinned changes before committing it",
         out_path.display(),
         lock.pins.len()
     );
@@ -72,7 +97,10 @@ fn run_verify(root: &Path) -> ExitCode {
     let lock_src = match fs::read_to_string(&lock_path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: cannot read {}: {e}", lock_path.display());
+            eprintln!(
+                "error: cannot read {}: {e}\n({REPO_HINT})",
+                lock_path.display()
+            );
             return ExitCode::from(1);
         }
     };
@@ -115,12 +143,16 @@ fn run_verify(root: &Path) -> ExitCode {
         }
     };
     println!(
-        "[2/3] Lean 4 axiom footprint verified ({} theorems, zero sorryAx / native_decide)",
+        "[2/3] lean/axioms.txt lists {} theorems using only standard axioms (lean/replay.sh regenerates it)",
         audited.len()
     );
 
-    println!("[3/3] running boundary, non-vacuity, and differential equivalence harness:");
-    run_suite_and_print(&VerifyConfig::default())
+    println!("[3/3] running boundary, non-vacuity, and differential tests:");
+    if !run_suite_and_print(&VerifyConfig::default()) {
+        return ExitCode::from(1);
+    }
+    println!("verify: ok");
+    ExitCode::SUCCESS
 }
 
 fn run_bench() -> ExitCode {
@@ -129,29 +161,35 @@ fn run_bench() -> ExitCode {
         bench_iters: 5_000,
         ..VerifyConfig::default()
     };
-    run_suite_and_print(&cfg)
+    if run_suite_and_print(&cfg) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
-fn run_suite_and_print(cfg: &VerifyConfig) -> ExitCode {
+/// Runs every example kernel through `verify_kernel` and prints one line each.
+/// Returns `false` (after printing the error) on the first failure.
+fn run_suite_and_print(cfg: &VerifyConfig) -> bool {
     let r1 = match verify_kernel(&AsciiLowerKernel, cfg) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::from(1);
+            return false;
         }
     };
     let r2 = match verify_kernel(&Utf8CountKernel, cfg) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::from(1);
+            return false;
         }
     };
     let r3 = match verify_kernel(&Mersenne31BatchKernel, cfg) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::from(1);
+            return false;
         }
     };
 
@@ -167,5 +205,5 @@ fn run_suite_and_print(cfg: &VerifyConfig) -> ExitCode {
             r.speedup_x
         );
     }
-    ExitCode::SUCCESS
+    true
 }

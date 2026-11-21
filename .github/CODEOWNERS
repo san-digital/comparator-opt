@@ -1,0 +1,6 @@
+# Every change needs review from a code owner. That matters most for comparator.lock, the
+# pinned blocks, and the code that runs the checks (see "What the lock protects" in README.md).
+#
+# This file only enforces anything when branch protection on main has
+# "Require review from Code Owners" turned on.
+* @leecrossley

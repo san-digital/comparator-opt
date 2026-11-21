@@ -8,13 +8,16 @@ on:
 permissions:
   contents: read
 
+# Actions are pinned to commit SHAs; the comment shows the version. Dependabot proposes updates.
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
         with:
+          toolchain: stable
           components: clippy, rustfmt
       - name: Format check
         run: cargo fmt --all -- --check
@@ -30,16 +33,36 @@ jobs:
         run: |
           cargo doc --no-deps --all-features
           cargo package --locked
+      - name: Challenge lock, axiom log, and differential tests
+        run: cargo run --release -- verify .
+      - name: Independent Python SHA-256 lock cross-check
+        run: python3 -I scripts/crosscheck.py
+
+  # Lean compiles Proofs.lean, and Lean can run code at compile time. Running it in its own job
+  # keeps it away from the Rust checks above. The `verify` job audits the committed
+  # lean/axioms.txt, and this job fails if that file differs from a fresh replay.
+  lean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Install elan
+        # elan-init.sh is pinned to the v4.4.0 tag commit. It installs the latest elan release,
+        # and elan then installs the Lean version pinned in lean-toolchain.
         run: |
-          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/3cc76985a1becb3c03cd65c1c5007e6f186ae474/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
           sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Compile, kernel-replay, and axiom-audit the Lean proofs
         run: ./lean/replay.sh
-      - name: Committed axiom log matches the fresh replay
-        run: git diff --exit-code -- lean/axioms.txt
-      - name: Challenge Lock and differential verification
-        run: cargo run --release -- verify .
-      - name: Independent Python SHA-256 Challenge Lock cross-check
-        run: python3 scripts/crosscheck.py
+      - name: Committed files match the fresh replay
+        run: git diff --exit-code
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: "1.81"
+      - name: Build and test on the minimum supported Rust version
+        run: cargo test --locked

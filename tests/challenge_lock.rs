@@ -249,3 +249,53 @@ fn harness_rejects_vacuous_domain_and_buggy_255_word_overflow() {
     assert!(!ref_mersenne31_valid(u64::MAX));
     assert_ne!(fast_mersenne31_mod(u64::MAX), ref_mersenne31_mod(u64::MAX));
 }
+
+#[test]
+fn block_parser_handles_crlf_nesting_duplicates_and_stray_markers() {
+    let lf = "// @comparator:begin a\nfn a() {}\n// @comparator:end a\n";
+    let crlf = lf.replace('\n', "\r\n");
+    let lf_pins = extract_pins_from_str("rust-ref", "x.rs", lf).unwrap();
+    let crlf_pins = extract_pins_from_str("rust-ref", "x.rs", &crlf).unwrap();
+    assert_eq!(lf_pins.len(), 1);
+    // CRLF checkouts hash the same as LF checkouts.
+    assert_eq!(lf_pins, crlf_pins);
+
+    // Lean-style markers are recognized too.
+    let lean = "-- @comparator:begin b\ndef b := 1\n-- @comparator:end b\n";
+    assert_eq!(
+        extract_pins_from_str("lean-challenge", "x.lean", lean)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let nested = "// @comparator:begin a\n// @comparator:begin b\n// @comparator:end b\n// @comparator:end a\n";
+    assert!(matches!(
+        extract_pins_from_str("rust-ref", "x.rs", nested),
+        Err(LockError::UnclosedMarker { id, .. }) if id == "a"
+    ));
+
+    let duplicate = format!("{lf}{lf}");
+    assert!(matches!(
+        extract_pins_from_str("rust-ref", "x.rs", &duplicate),
+        Err(LockError::DuplicateId { id }) if id == "a"
+    ));
+
+    let unclosed = "// @comparator:begin a\nfn a() {}\n";
+    assert!(matches!(
+        extract_pins_from_str("rust-ref", "x.rs", unclosed),
+        Err(LockError::UnclosedMarker { .. })
+    ));
+
+    let stray_end = "fn a() {}\n// @comparator:end a\n";
+    assert!(matches!(
+        extract_pins_from_str("rust-ref", "x.rs", stray_end),
+        Err(LockError::MalformedLock { .. })
+    ));
+
+    let mismatched = "// @comparator:begin a\n// @comparator:end b\n";
+    assert!(matches!(
+        extract_pins_from_str("rust-ref", "x.rs", mismatched),
+        Err(LockError::UnclosedMarker { id, .. }) if id == "a"
+    ));
+}

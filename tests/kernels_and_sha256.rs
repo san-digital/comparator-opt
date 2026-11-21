@@ -25,6 +25,29 @@ fn sha256_matches_nist_fips_180_4_vectors() {
 }
 
 #[test]
+fn sha256_matches_python_hashlib_at_padding_boundaries() {
+    // Lengths around the one-block / two-block padding split (55, 56) and block edges (63, 64,
+    // 119, 120, 128). Input byte i is `i % 251`. Expected digests come from Python `hashlib`.
+    let cases = "\
+55 463eb28e72f82e0a96c0a4cc53690c571281131f672aa229e0d45ae59b598b59
+56 da2ae4d6b36748f2a318f23e7ab1dfdf45acdc9d049bd80e59de82a60895f562
+57 2fe741af801cc238602ac0ec6a7b0c3a8a87c7fc7d7f02a3fe03d1c12eac4d8f
+63 29af2686fd53374a36b0846694cc342177e428d1647515f078784d69cdb9e488
+64 fdeab9acf3710362bd2658cdc9a29e8f9c757fcf9811603a8c447cd1d9151108
+65 4bfd2c8b6f1eec7a2afeb48b934ee4b2694182027e6d0fc075074f2fabb31781
+119 da18797ed7c3a777f0847f429724a2d8cd5138e6ed2895c3fa1a6d39d18f7ec6
+120 f52b23db1fbb6ded89ef42a23ce0c8922c45f25c50b568a93bf1c075420bbb7c
+128 471fb943aa23c511f6f72f8d1652d9c880cfa392ad80503120547703e56a2be5
+";
+    for case in cases.lines() {
+        let (len, expected) = case.split_once(' ').unwrap();
+        let len: usize = len.parse().unwrap();
+        let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+        assert_eq!(sha256_hex(&data), expected, "length {len}");
+    }
+}
+
+#[test]
 fn all_three_superoptimized_kernels_pass_full_differential_harness() {
     let cfg = VerifyConfig {
         samples: 5_000,
